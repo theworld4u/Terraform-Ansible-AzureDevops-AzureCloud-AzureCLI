@@ -1,0 +1,7 @@
+app_name: "MyApp_Test"
+app_env: "testing"
+packages:
+  - nginx
+  - git
+  - curl
+additional_config: "debug_mode=false"

@@ -1,0 +1,7 @@
+- name: Copy HTML page to Nginx web root
+  template:
+    src: index.html.j2  # Change this to your actual HTML file path
+    dest: /var/www/html/index.html
+    owner: www-data
+    group: www-data
+    mode: '0644'

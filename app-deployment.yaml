@@ -1,0 +1,141 @@
+trigger:
+- main
+
+parameters:
+  - name: environment
+    displayName: 'Environment'
+    type: string
+    default: 'dev'
+    values:
+      - dev
+      - test
+      - prod
+
+variables:
+  - template: appConfig/${{ parameters.environment }}.yaml 
+  - group: appsecrets     
+
+pool:
+  name: 'vmss-agent-pool'  # Replace with your VMSS agent pool name
+
+stages:
+- stage: InstallDependencies
+  displayName: 'Install Dependencies'
+  jobs:
+  - job: Install
+    displayName: 'Install Git, Azure CLI, and Terraform'
+    steps:
+    - script: |
+        sudo apt update
+        # Install Git
+        sudo apt install -y git
+        sudo apt install -y gawk
+        sudo apt install sshpass
+
+        # Install Azure CLI
+        curl -sL https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+        echo "deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/azure-cli.list
+        sudo apt update
+        sudo apt install -y azure-cli
+
+        # Install Terraform
+        sudo apt install -y gnupg software-properties-common
+        curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+        echo "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+        sudo apt update
+        sudo apt install -y terraform
+        
+        # Verify installations
+        git --version
+        az --version
+        terraform --version
+      displayName: 'Install Git, Azure CLI, and Terraform on Ubuntu'
+
+- stage: TerraformPlan
+  displayName: 'Terraform Plan'
+  dependsOn: InstallDependencies  # Ensure this stage runs after dependencies are installed
+  jobs:
+  - job: Plan
+    displayName: 'Run Terraform Plan'
+    steps:
+    - script: |
+        cd terraform
+        terraform init
+        terraform workspace select ${{ parameters.environment }} || terraform workspace new ${{ parameters.environment }}
+        # Setting library variables as environment variables
+        export TF_VAR_adminuser=$(adminuser)
+        export TF_VAR_adminpassword=$(adminpassword)
+        terraform plan -var-file="env_vars/${{ parameters.environment }}.tfvars" -out=tfplan
+      displayName: 'Run Terraform Plan'
+
+- stage: TerraformApply
+  displayName: 'Terraform Apply'
+  dependsOn: TerraformPlan
+  condition: succeeded()  # Ensure the previous stage succeeded
+  jobs:
+  - deployment: Apply
+    environment: 'Terraform Apply Environment'  # Reference to the environment created with gates
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - script: |
+              cd terraform
+              terraform apply -auto-approve tfplan
+            displayName: 'Run Terraform Apply'
+
+- stage: DeployApplication
+  dependsOn: TerraformApply
+  jobs:
+  - job: Deploy_Application
+    displayName: "Deploy Application"
+
+    steps:
+
+      # Install Ansible (or ensure it's available)
+      - script: |
+          sudo apt-get update
+          sudo apt-get install -y ansible
+        displayName: "Install Ansible"
+
+      - task: AzureCLI@2
+        inputs:
+          azureSubscription: 'sc-sampleApp-pipeline-dev'
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            # Retrieve the public IP address
+            IP_ADDRESS=$(az network public-ip show \
+            --resource-group rg-$(app_name)-${{ parameters.environment }} \
+            --name $(app_name)-pubip-${{ parameters.environment }} \
+            --query "ipAddress" \
+            -o tsv)
+        
+            # Set the IP address as a pipeline variable
+            echo "##vso[task.setvariable variable=publicIpAddress]$IP_ADDRESS"
+            
+            # Create a temporary inventory file
+            echo "$IP_ADDRESS ansible_user=$(adminuser) ansible_password=$(adminpassword) ansible_ssh_extra_args='-o StrictHostKeyChecking=no'" >> tempinventory
+            # Run the Ansible playbook
+            ansible-playbook --extra-vars "env=${{ parameters.environment }} public_ip=$IP_ADDRESS" -i tempinventory ansible/playbook.yaml
+        displayName: "Retrieve VMSS Public IP Address and Set as Variable"
+
+- stage: TerraformDestroy
+  displayName: 'Terraform Destroy'
+  dependsOn: TerraformApply
+  jobs:
+  - deployment: Destroy
+    environment: 'Terraform Destroy Environment'  # Separate environment with its own gates
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - script: |
+              cd terraform
+              terraform init
+              # Select the workspace
+              terraform workspace select ${{ parameters.environment }}
+              export TF_VAR_adminuser=$(adminuser)
+              export TF_VAR_adminpassword=$(adminpassword)
+              terraform destroy -auto-approve -var-file="env_vars/${{ parameters.environment }}.tfvars"
+            displayName: 'Run Terraform Destroy'

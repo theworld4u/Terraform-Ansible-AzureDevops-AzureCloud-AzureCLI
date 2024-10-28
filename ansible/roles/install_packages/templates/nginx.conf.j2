@@ -1,0 +1,22 @@
+server {
+    listen 80;  # Listen on port 80
+    server_name {{ public_ip }};  # Replace with your domain name or IP address
+
+    root /var/www/html;  # Root directory for the site
+    index index.html index.htm;  # Default index file(s)
+
+    location / {
+        try_files $uri $uri/ =404;  # Serve files or return 404
+    }
+
+    error_page 404 /404.html;  # Custom 404 error page
+    error_page 500 502 503 504 /50x.html;  # Custom 50x error page
+
+    location = /50x.html {
+        root /var/www/html;  # Path to custom 50x error page
+    }
+
+    location ~ /\.ht {
+        deny all;  # Deny access to .htaccess files
+    }
+}

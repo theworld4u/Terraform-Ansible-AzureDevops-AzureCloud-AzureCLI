@@ -1,0 +1,8 @@
+- name: Provision and Deploy on VMSS
+  hosts: all
+  become: yes
+  vars_files:
+    - "env_vars/{{ env }}.yaml"
+  roles:
+    - install_packages
+    - deploy_application

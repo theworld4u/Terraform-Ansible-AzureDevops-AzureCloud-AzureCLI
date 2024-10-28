@@ -1,0 +1,7 @@
+app_name: "MyApp_Prod"
+app_env: "production"
+packages:
+  - nginx
+  - git
+  - curl
+additional_config: "debug_mode=false"

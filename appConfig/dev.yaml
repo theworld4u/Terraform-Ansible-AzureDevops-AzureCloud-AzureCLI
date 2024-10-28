@@ -1,0 +1,3 @@
+variables:
+  keyvault_name: "kv-dev-subs-secrets"
+  app_name: "sampleApp"

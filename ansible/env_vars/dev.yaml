@@ -1,0 +1,7 @@
+app_name: "MyApp_Dev"
+app_env: "development"
+packages:
+  - nginx
+  - git
+  - curl
+additional_config: "debug_mode=true"
